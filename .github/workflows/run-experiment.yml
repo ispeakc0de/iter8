@@ -1,0 +1,72 @@
+name: image retag
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/README.md'
+
+jobs:
+
+  run-experiment:
+    runs-on: [self-hosted,litmus]
+    steps:
+      # Setup gopath
+      - name: Setting up GOPATH 
+        run: |
+          echo "GOPATH=${GITHUB_WORKSPACE}/go" >> $GITHUB_ENV
+          
+      # Checkout to the latest commit
+      # On specific directory/path
+      - uses: actions/checkout@v2
+        with:
+          path: go/src/github.com/${{github.repository}}
+
+      - name: install litmus
+        run: |
+          kubectl apply -f https://litmuschaos.github.io/litmus/litmus-operator-v1.13.5.yaml
+      
+      - name: install chaos charts
+        run: |
+          kubectl apply -f https://hub.litmuschaos.io/api/chaos/1.13.5?file=charts/generic/pod-delete/experiment.yaml -n litmus
+
+      - name: create rbac
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}
+          kubectl apply -f ./experiment/pod-delete-sa.yaml -n litmus
+      
+      - name: clone iter8
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}
+          git clone https://github.com/iter8-tools/iter8.git
+
+      - name: install iter8
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}/iter8
+          export ITER8=$(pwd)
+          ./samples/knative/quickstart/platformsetup.sh contour
+
+      - name: run applications
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}/iter8
+          kubectl apply -f ./samples/knative/quickstart/baseline.yaml
+          kubectl apply -f ./samples/knative/quickstart/experimentalservice.yaml
+          kubectl wait --for=condition=Ready ksvc/sample-app
+
+      - name: generate load
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}/iter8
+          # URL_VALUE is the URL where your Knative application serves requests
+          URL_VALUE=$(kubectl get ksvc sample-app -o json | jq .status.address.url)
+          sed "s+URL_VALUE+${URL_VALUE}+g" ./samples/knative/quickstart/fortio.yaml | kubectl apply -f -
+
+      - name: install metrics
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}/iter8
+          kubectl apply -f ./samples/knative/quickstart/metrics.yaml
+
+      - name: create experiment
+        run: |
+          cd ${GOPATH}/src/github.com/${{github.repository}}
+          kubectl apply -f ./experiment/rbac.yaml -n litmus
+          kubectl apply -f ./experiment/experiment.yaml

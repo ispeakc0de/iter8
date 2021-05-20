@@ -1,0 +1,20 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: network-chaos
+  labels:
+    litmuschaos.io/engine-context: test
+spec:
+  engineState: "active"
+  annotationCheck: "false"
+  components:
+    runner:
+      imagePullPolicy: "Always"
+  appinfo:
+    appns: "default"
+    applabel: "app=sample-app-v2"
+    appkind: "deployment"
+  jobCleanUpPolicy: 'retain'
+  chaosServiceAccount: pod-delete-sa
+  experiments:
+  - name: pod-delete
